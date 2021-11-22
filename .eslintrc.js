@@ -17,6 +17,7 @@ module.exports = {
   },
   "settings": {
     "node": {
+        "resolvePaths": ["node_modules/@types"],
         "tryExtensions": [".js", ".json", ".node", ".ts", ".d.ts"]
     },
   },
@@ -32,6 +33,11 @@ module.exports = {
         semi: false,
         trailingComma: 'none'
       }
-    ]
+    ],
+    "node/no-unpublished-import": ["error", {
+            "allowModules": [],
+            "convertPath": null,
+            "tryExtensions": [".js", ".json", ".node"]
+    }]
   },
 };
