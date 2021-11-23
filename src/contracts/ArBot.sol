@@ -2,31 +2,20 @@
 
 pragma solidity ^0.8.0;
 
+import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "./interfaces/IUniswapV2Pair.sol";
 import "hardhat/console.sol";
 
-library SafeMath {
-  function add(uint x, uint y) internal pure returns (uint z) {
-      require((z = x + y) >= x, 'ds-math-add-overflow');
-  }
-
-  function sub(uint x, uint y) internal pure returns (uint z) {
-      require((z = x - y) <= x, 'ds-math-sub-underflow');
-  }
-
-  function mul(uint x, uint y) internal pure returns (uint z) {
-      require(y == 0 || (z = x * y) / y == x, 'ds-math-mul-overflow');
-  }
-}
 
 contract ArBot {
+  // using Decimal for Decimal.D256;
   using SafeMath for uint256;
 
   struct Reserves {
-    uint256 dai1;
-    uint256 weth1;
-    uint256 dai2;
-    uint256 weth2;
+    uint256 daiA;
+    uint256 wethA;
+    uint256 daiB;
+    uint256 wethB;
     address lowerPool;
     address otherPool;
   }
@@ -44,9 +33,15 @@ contract ArBot {
     // Denomincated in WETH
     (uint256 priceDai1, uint256 priceDai2) = (dai1/weth1, dai2/weth2);
 
+    console.log("Price DAI per weth");
+    console.log("Pool0", priceDai1);
+    console.log("Pool1", priceDai2);
+
     address lower = priceDai1 < priceDai2 ? _pool0 : _pool1;
     address other = lower == _pool1 ? _pool0 : _pool1;
-    reserves = Reserves(dai1, weth1, dai2, weth2, lower, other);
+    reserves = lower == _pool0 
+      ? Reserves(dai1, weth1, dai2, weth2, lower, other)
+      : Reserves(dai2, weth2, dai1, weth1, lower, other);
   }
 
   // Calculate profit that results from a trade between two pools
@@ -55,12 +50,18 @@ contract ArBot {
 
     uint256 loan = _calcLoan(reserves);
 
-    // TODO Complete
+    console.log("loan amt:", loan.div(1e18));
+    // (Decimal.D256 memory price0, Decimal.D256 memory price1) = (Decimal.from(dai1).div(weth1), Decimal.from(dai2).div(weth2));
+    uint256 daiToReturn = getAmountIn(loan, reserves.daiA, reserves.wethA);
+    uint256 daiOut = getAmountOut(loan, reserves.wethB, reserves.daiB);
 
+    console.log("Profit? ", daiOut > daiToReturn);
+
+    profit = daiOut > daiToReturn ? daiOut - daiToReturn : 0;
   }
 
   // Calculate the borrow amount that maximizes the profit
-  function _calcLoan(Reserves memory reserves) internal pure returns (uint256 toLoan) {
+  function _calcLoan(Reserves memory reserves) internal view returns (uint256 toLoan) {
     uint256 min = _min(reserves);
 
     uint256 d;
@@ -88,11 +89,23 @@ contract ArBot {
       d = 1e10;
     }
 
-    (int256 a1, int256 a2, int256 b1, int256 b2) =
-      (int256(reserves.dai1 / d), int256(reserves.weth1 / d), int256(reserves.dai2 / d), int256(reserves.weth2 / d));
+    console.log('daiA: ', reserves.daiA.div(1e18));
+    console.log('wethA: ', reserves.wethA.div(1e18));
+    console.log('daiB: ', reserves.daiB.div(1e18));
+    console.log('wethB: ', reserves.wethB.div(1e18));
+
+    (int256 a1, int256 b1, int256 a2, int256 b2) =
+      (
+        int256(reserves.daiA.div(d)), 
+        int256(reserves.wethA.div(d)), 
+        int256(reserves.daiB.div(d)), 
+        int256(reserves.wethB.div(d))
+      );
 
     (int256 x1, int256 x2) = _solveQuadratic(a1, a2, b1, b2);
-    return (x1 > 0 && x1 < b1 && x1 < b2) ? uint256(x1) * d : uint256(x2) * d;
+
+    require((x1 > 0 && x1 < b1 && x1 < b2) || (x2 > 0 && x2 < b1 && x2 < b2), 'Wrong input order');
+    return (x1 > 0 && x1 < b1 && x1 < b2) ? uint256(x1).mul(d) : uint256(x2).mul(d);
   }
 
   // Returns the roots of the equation if they exist, else throws
@@ -111,8 +124,8 @@ contract ArBot {
 
   // Returns the min of the reserves
   function _min(Reserves memory reserves) internal pure returns (uint256 min) {
-    uint256 m1 = reserves.dai1 < reserves.dai2 ? reserves.dai1 : reserves.dai2;
-    min = reserves.weth1 < reserves.weth2 ? reserves.weth1 : reserves.weth2;
+    uint256 m1 = reserves.daiA < reserves.daiB ? reserves.daiA : reserves.daiB;
+    min = reserves.wethA < reserves.wethB ? reserves.wethA : reserves.wethB;
     min = min < m1 ? min : m1;
   }
 
@@ -141,7 +154,11 @@ contract ArBot {
   }
 
   // Function from UniV2 library at https://github.com/Uniswap/v2-periphery/blob/master/contracts/libraries/UniswapV2Library.sol
-  function getAmountIn(uint amountOut, uint reserveIn, uint reserveOut) internal pure returns (uint amountIn) {
+  function getAmountIn(uint amountOut, uint reserveIn, uint reserveOut) internal view returns (uint amountIn) {
+    // console.log("amountOut: ", amountOut);
+    // console.log("reserveIn: ", reserveIn);
+    // console.log("reserveOut: ", reserveOut);
+
     require(amountOut > 0, 'ArBot: INSUFFICIENT_OUTPUT_AMOUNT');
     require(reserveIn > 0 && reserveOut > 0, 'ArBot: INSUFFICIENT_LIQUIDITY');
     uint numerator = reserveIn.mul(amountOut).mul(1000);
