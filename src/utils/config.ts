@@ -8,7 +8,7 @@ export const tokenName = {
   '0x6b175474e89094c44da98b954eedeac495271d0f': 'DAI'
 }
 
-export const exchangeName = {
+export const exchangeName: {[index: string]: string} = {
   '0xa478c2975ab1ea89e8196811f51a7b7ade33eb11': 'UniswapV2',
   '0xc3d03e4f041fd4cd388c549ee2a29a9e5075882f': 'Sushiswap',
   '0x8faf958e36c6970497386118030e6297fff8d275': 'Shebaswap',
