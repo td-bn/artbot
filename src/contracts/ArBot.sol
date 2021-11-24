@@ -3,14 +3,20 @@
 pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "./interfaces/IUniswapV2Pair.sol";
 import "hardhat/console.sol";
 
 
 contract ArBot {
-  // using Decimal for Decimal.D256;
-  using SafeMath for uint256;
 
+  using SafeMath for uint256;
+  using SafeERC20 for IERC20;
+
+  address public constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
+  address public constant DAI = 0x6B175474E89094C44Da98b954EedeAC495271d0F;
+  
   struct Reserves {
     uint256 daiA;
     uint256 wethA;
@@ -20,6 +26,60 @@ contract ArBot {
     address otherPool;
   }
 
+  struct CallbackData {
+    address debtPool;
+    address targetPool;
+    uint256 loan;
+    uint256 daiOut;
+  }
+
+  receive() external payable {}
+
+  /// @dev Redirect uniswap callback function
+  /// The callback function on different DEX are not same, so use a fallback to redirect to uniswapV2Call
+  fallback(bytes calldata _input) external returns (bytes memory) {
+    (address sender, uint256 amount0, uint256 amount1, bytes memory data) = abi.decode(_input[4:], (address, uint256, uint256, bytes));
+    uniswapV2Call(sender, amount0, amount1, data);
+  }
+
+  function arbitrate(address _pool0, address _pool1) external {
+    Reserves memory reserves = getReserves(_pool0, _pool1);
+
+    uint256 loanAmount = _calcLoan(reserves);
+
+    uint256 daiToReturn = getAmountIn(loanAmount, reserves.daiA, reserves.wethA);
+    uint256 daiOut = getAmountOut(loanAmount, reserves.wethB, reserves.daiB);
+    require(daiOut > daiToReturn, 'No profit');
+    
+    CallbackData memory cd;
+    cd.debtPool = reserves.lowerPool;
+    cd.targetPool = reserves.otherPool;
+    cd.loan = loanAmount;
+    cd.daiOut = daiOut;
+
+    bytes memory data = abi.encode(cd);
+    IUniswapV2Pair(reserves.lowerPool).swap(0, loanAmount, address(this), data);
+  } 
+
+  function uniswapV2Call(
+    address sender,
+    uint256 amount0,
+    uint256 amount1,
+    bytes memory data
+  ) public {
+    // TODO: Access control 
+    require(sender == address(this), 'Not from this contract');
+
+    uint256 loan = amount0 > 0 ? amount0 : amount1;
+    CallbackData memory cd = abi.decode(data, (CallbackData));
+
+    IERC20(WETH).safeTransfer(cd.targetPool, loan);
+
+    IUniswapV2Pair(cd.targetPool).swap(cd.daiOut, 0, address(this), new bytes(0));
+
+    IERC20(DAI).safeTransfer(cd.debtPool, cd.loan);
+  }
+    
   // Returns true if address of tokenA is smaller than address of tokenB
   function addressCompare(address tokenA, address tokenB) public pure returns (bool) {
     return tokenA < tokenB;
@@ -59,6 +119,8 @@ contract ArBot {
 
     profit = daiOut > daiToReturn ? daiOut - daiToReturn : 0;
   }
+
+
 
   // Calculate the borrow amount that maximizes the profit
   function _calcLoan(Reserves memory reserves) internal view returns (uint256 toLoan) {
@@ -154,11 +216,7 @@ contract ArBot {
   }
 
   // Function from UniV2 library at https://github.com/Uniswap/v2-periphery/blob/master/contracts/libraries/UniswapV2Library.sol
-  function getAmountIn(uint amountOut, uint reserveIn, uint reserveOut) internal view returns (uint amountIn) {
-    // console.log("amountOut: ", amountOut);
-    // console.log("reserveIn: ", reserveIn);
-    // console.log("reserveOut: ", reserveOut);
-
+  function getAmountIn(uint amountOut, uint reserveIn, uint reserveOut) internal pure returns (uint amountIn) {
     require(amountOut > 0, 'ArBot: INSUFFICIENT_OUTPUT_AMOUNT');
     require(reserveIn > 0 && reserveOut > 0, 'ArBot: INSUFFICIENT_LIQUIDITY');
     uint numerator = reserveIn.mul(amountOut).mul(1000);
