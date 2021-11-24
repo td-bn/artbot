@@ -35,13 +35,13 @@ contract ArBot {
 
   receive() external payable {}
 
-  /// @dev Redirect uniswap callback function
-  /// The callback function on different DEX are not same, so use a fallback to redirect to uniswapV2Call
+  // Redirect uniswap callback function to uniswapV2Call
   fallback(bytes calldata _input) external returns (bytes memory) {
     (address sender, uint256 amount0, uint256 amount1, bytes memory data) = abi.decode(_input[4:], (address, uint256, uint256, bytes));
     uniswapV2Call(sender, amount0, amount1, data);
   }
 
+  // Flash Swap + Arbitrage
   function arbitrate(address _pool0, address _pool1) external {
     Reserves memory reserves = getReserves(_pool0, _pool1);
 
@@ -61,6 +61,7 @@ contract ArBot {
     IUniswapV2Pair(reserves.lowerPool).swap(0, loanAmount, address(this), data);
   } 
 
+  // Callback
   function uniswapV2Call(
     address sender,
     uint256 amount0,
